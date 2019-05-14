@@ -13,7 +13,6 @@ from xml.sax.saxutils import escape
 
 _logger = logging.getLogger(__name__)
 
-
 def make_msj_receptor(url, clave, cedula_emisor, fecha_emision, id_mensaje, detalle_mensaje, cedula_receptor,
                       consecutivo_receptor, monto_impuesto=0, total_factura=0):
 
@@ -67,10 +66,10 @@ def make_msj_receptor(url, clave, cedula_emisor, fecha_emision, id_mensaje, deta
     payload['mensaje'] = mr_mensaje_id
     payload['detalle_mensaje'] = mr_detalle_mensaje
 
-    if mr_monto_impuesto is not None and mr_monto_impuesto > 0:
+    if mr_monto_impuesto is not None and mr_monto_impuesto != 0:
         payload['monto_total_impuesto'] = mr_monto_impuesto
 
-    if mr_total_factura is not None and mr_total_factura > 0:
+    if mr_total_factura is not None and mr_total_factura != 0:
         payload['total_factura'] = mr_total_factura
     else:
         raise UserError('El monto Total de la Factura para el Mensaje Receptor es inválido')
@@ -79,14 +78,20 @@ def make_msj_receptor(url, clave, cedula_emisor, fecha_emision, id_mensaje, deta
     payload['numero_consecutivo_receptor'] = mr_consecutivo_receptor
 
     response = requests.request("POST", url, data=payload, headers=headers)
-    response_json = response.json()
-    xml = response_json.get('resp').get('xml')
 
-    return xml
+    xresponse_json = response.json()
+    _logger.error('MAB - make_msj_receptor PAYLOAD: %s' % payload)
+    _logger.error('MAB - make_msj_receptor response: %s' % xresponse_json)
+    if isinstance(xresponse_json.get('resp'), int):
+        response_json = {'status': 500, 'text': 'make_msj_receptor failed: %s' % response.reason}
+    elif (200 <= response.status_code <= 299):
+        response_json = {'status': 200, 'xml': xresponse_json.get('resp').get('xml')}
+    else:
+        response_json = {'status': response.status_code, 'text': 'make_msj_receptor failed: %s' % response.reason}
 
+    return response_json
 
-def get_clave(self, url, tipo_documento, numeracion, sucursal, terminal, situacion='normal'):
-
+def get_clave(self, tipo_documento, numeracion, sucursal, terminal, situacion='normal'):
     # tipo de documento
     tipos_de_documento = { 'FE'  : '01', # Factura Electrónica
                            'ND'  : '02', # Nota de Débito
@@ -97,7 +102,7 @@ def get_clave(self, url, tipo_documento, numeracion, sucursal, terminal, situaci
                            'RCE' : '07'} # Rechazo Comprobante Electrónico
 
     if tipo_documento not in tipos_de_documento:
-        raise UserError('No se encuentra tipo de documento')
+        raise UserError('No se encuentra tipo de documento ' + tipo_documento)
 
     tipo_documento = tipos_de_documento[tipo_documento]
 
@@ -159,21 +164,23 @@ def get_clave(self, url, tipo_documento, numeracion, sucursal, terminal, situaci
     # clave
     clave = codigo_de_pais + dia + mes + anio + identificacion + consecutivo + situacion + codigo_de_seguridad
 
-    return {'resp': {'length': len(clave), 'clave': clave, 'consecutivo': consecutivo}}
+    return {'length': len(clave), 'clave': clave, 'consecutivo': consecutivo}
 
 
 def make_xml_invoice(inv, tipo_documento, consecutivo, date, sale_conditions, medio_pago, total_servicio_gravado,
-                     total_servicio_exento, total_mercaderia_gravado, total_mercaderia_exento, base_total, lines,
-                     tipo_documento_referencia, numero_documento_referencia, fecha_emision_referencia,
-                     codigo_referencia, razon_referencia, url, currency_rate):
+                     total_servicio_exento, total_mercaderia_gravado, total_mercaderia_exento, base_subtotal,
+                     total_impuestos, total_descuento, lines, tipo_documento_referencia, numero_documento_referencia,
+                     fecha_emision_referencia, codigo_referencia, razon_referencia, url, currency_rate):
     headers = {}
     payload = {}
     # Generar FE payload
     payload['w'] = 'genXML'
-    if tipo_documento == 'FE':
+    if tipo_documento in ('FE','TE'):
         payload['r'] = 'gen_xml_fe'
     elif tipo_documento == 'NC':
         payload['r'] = 'gen_xml_nc'
+    elif tipo_documento == 'ND':
+        payload['r'] = 'gen_xml_nd'
     payload['clave'] = inv.number_electronic
     payload['consecutivo'] = consecutivo
     payload['fecha_emision'] = date
@@ -184,25 +191,61 @@ def make_xml_invoice(inv, tipo_documento, consecutivo, date, sale_conditions, me
     payload['emisor_provincia'] = inv.company_id.state_id.code
     payload['emisor_canton'] = inv.company_id.county_id.code
     payload['emisor_distrito'] = inv.company_id.district_id.code
-    payload['emisor_barrio'] = inv.company_id.neighborhood_id.code or ''
+    payload['emisor_barrio'] = inv.company_id.neighborhood_id and inv.company_id.neighborhood_id.code or ''
     payload['emisor_otras_senas'] = escape(inv.company_id.street)
     payload['emisor_cod_pais_tel'] = inv.company_id.phone_code
-    payload['emisor_tel'] = re.sub('[^0-9]+', '', inv.company_id.phone)
+    payload['emisor_tel'] = inv.company_id.phone and re.sub('[^0-9]+', '', inv.company_id.phone) or ''
     payload['emisor_email'] = inv.company_id.email
-    payload['receptor_nombre'] = escape(inv.partner_id.name[:80])
-    payload['receptor_tipo_identif'] = inv.partner_id.identification_id.code
-    payload['receptor_num_identif'] = inv.partner_id.vat
-    payload['receptor_provincia'] = inv.partner_id.state_id.code or ''
-    payload['receptor_canton'] = inv.partner_id.county_id.code or ''
-    payload['receptor_distrito'] = inv.partner_id.district_id.code or ''
-    payload['receptor_barrio'] = inv.partner_id.neighborhood_id.code or ''
-    payload['receptor_cod_pais_tel'] = inv.partner_id.phone_code
-    payload['receptor_tel'] = re.sub('[^0-9]+', '', inv.partner_id.phone)
-    payload['receptor_email'] = inv.partner_id.email
-    payload['condicion_venta'] = sale_conditions
-    payload['plazo_credito'] = inv.partner_id.property_payment_term_id.line_ids[0].days or '0'
+    if not inv.partner_id or not inv.partner_id.vat:
+        payload['omitir_receptor'] = 'true'
+    else:
+        vat = re.sub('[^0-9]', '', inv.partner_id.vat)
+        if inv.partner_id and vat:  # and doc.partner_id.email:
+            if not inv.partner_id.identification_id:
+                if len(vat) == 9:  # cedula fisica
+                    id_code = '01'
+                elif len(vat) == 10:  # cedula juridica
+                    id_code = '02'
+                elif len(vat) == 11 or len(vat) == 12:  # dimex
+                    id_code = '03'
+                else:
+                    id_code = '05'
+            else:
+                id_code = inv.partner_id.identification_id.code
+
+            if id_code == '05':
+                payload['omitir_receptor'] = 'true'
+            else:
+                payload['receptor_nombre'] = escape(inv.partner_id.name[:80])
+                payload['receptor_tipo_identif'] = id_code
+                payload['receptor_num_identif'] = vat
+                payload['receptor_provincia'] = inv.partner_id.state_id.code or ''
+                payload['receptor_canton'] = inv.partner_id.county_id.code or ''
+                payload['receptor_distrito'] = inv.partner_id.district_id.code or ''
+                payload['receptor_barrio'] = inv.partner_id.neighborhood_id.code or ''
+
+                #if inv.partner_id.phone:
+                #    payload['receptor_cod_pais_tel'] = inv.partner_id.phone_code or '506'
+                #    payload['receptor_tel'] = re.sub('[^0-9]+', '', inv.partner_id.phone)[:19]
+                #else:
+                payload['receptor_cod_pais_tel'] = ''
+                payload['receptor_tel'] = ''
+
+                match = inv.partner_id.email and re.match(r'^(\s?[^\s,]+@[^\s,]+\.[^\s,]+\s?,)*(\s?[^\s,]+@[^\s,]+\.[^\s,]+)$', inv.partner_id.email.lower())
+                if match:
+                    payload['receptor_email'] = inv.partner_id.email
+                else:
+                    payload['receptor_email'] = 'indefinido@indefinido.com'
+    #if tipo_documento == 'TE':
+    if inv._name == 'pos.order':
+        payload['condicion_venta'] = sale_conditions
+        payload['plazo_credito'] = '0'
+        payload['cod_moneda'] = inv.company_id.currency_id.name
+    else:
+        payload['condicion_venta'] = sale_conditions
+        payload['plazo_credito'] = inv.payment_term_id and inv.payment_term_id.line_ids[0].days or '0'
+        payload['cod_moneda'] = inv.currency_id.name
     payload['medio_pago'] = medio_pago
-    payload['cod_moneda'] = inv.currency_id.name
     payload['tipo_cambio'] = currency_rate
     payload['total_serv_gravados'] = total_servicio_gravado
     payload['total_serv_exentos'] = total_servicio_exento
@@ -211,11 +254,10 @@ def make_xml_invoice(inv, tipo_documento, consecutivo, date, sale_conditions, me
     payload['total_gravados'] = total_servicio_gravado + total_mercaderia_gravado
     payload['total_exentos'] = total_servicio_exento + total_mercaderia_exento
     payload['total_ventas'] = total_servicio_gravado + total_mercaderia_gravado + total_servicio_exento + total_mercaderia_exento
-    payload['total_descuentos'] = round(base_total - inv.amount_untaxed, 2)
-    payload['total_ventas_neta'] = round((total_servicio_gravado + total_mercaderia_gravado + total_servicio_exento + total_mercaderia_exento) - \
-                                   (base_total - inv.amount_untaxed), 2)
-    payload['total_impuestos'] = round(inv.amount_tax, 2)
-    payload['total_comprobante'] = round(inv.amount_total, 2)
+    payload['total_descuentos'] = total_descuento
+    payload['total_ventas_neta'] = base_subtotal
+    payload['total_impuestos'] = total_impuestos
+    payload['total_comprobante'] = base_subtotal + total_impuestos
     payload['otros'] = ''
     payload['detalles'] = lines
 
@@ -229,7 +271,16 @@ def make_xml_invoice(inv, tipo_documento, consecutivo, date, sale_conditions, me
         payload['infoRefeRazon'] = razon_referencia
 
     response = requests.request("POST", url, data=payload, headers=headers)
-    response_json = response.json()
+    xresponse_json = response.json()
+    _logger.error('MAB - create_xml_file PAYLOAD: %s' % payload)
+    _logger.error('MAB - create_xml_file response: %s' % xresponse_json)
+    if isinstance(xresponse_json.get('resp'), int):
+        response_json = {'status': 500, 'text': 'make_xml_invoice failed: %s' % response.reason}
+    elif (200 <= response.status_code <= 299):
+        response_json = {'status': 200, 'xml': xresponse_json.get('resp').get('xml')}
+    else:
+        response_json = {'status': response.status_code, 'text': 'make_xml_invoice failed: %s' % response.reason}
+
     return response_json
 
 last_tokens = {}
@@ -273,7 +324,6 @@ def token_hacienda(company):
 
     return response_json
 
-
 def sign_xml(inv, tipo_documento, url, xml):
     payload = {}
     headers = {}
@@ -293,35 +343,55 @@ def sign_xml(inv, tipo_documento, url, xml):
     return response_json
 
 
-def send_file(inv, token, date, xml, env):
+def send_file(inv, token, xml, env):
 
     if env == 'api-stag':
         url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/'
     elif env == 'api-prod':
         url = 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/'
+    else:
+        _logger.error('MAB - Ambiente no definido')
+        return
 
-    xml = base64.b64decode(xml)
+    xml_decoded = base64.b64decode(xml)
+    try:
+        factura = etree.fromstring(xml_decoded)
+    except Exception as e:
+        #raise UserError(_(
+        #    "This XML file is not XML-compliant. Error: %s") % e)
+        _logger.info('MAB - This XML file is not XML-compliant.  Exception %s' % e)
+        return {'status': 400, 'text': 'Excepción de conversión de XML'}
+    pretty_xml_string = etree.tostring(
+        factura, pretty_print=True, encoding='UTF-8',
+        xml_declaration=True)
 
-    factura = etree.tostring(etree.fromstring(xml)).decode()
-    factura = etree.fromstring(re.sub(' xmlns="[^"]+"', '', factura, count=1))
+    _logger.error('MAB - send_file XML: %s' % pretty_xml_string)
 
-    Clave = factura.find('Clave')
-    FechaEmision = factura.find('FechaEmision')
-    Emisor = factura.find('Emisor')
-    Receptor = factura.find('Receptor')
+    namespaces = factura.nsmap
+    inv_xmlns = namespaces.pop(None)
+    namespaces['inv'] = inv_xmlns
+
+    #factura = etree.tostring(etree.fromstring(xml_decoded)).decode()
+    #factura = etree.fromstring(re.sub(' xmlns="[^"]+"', '', factura, count=1))
+
+    clave = factura.xpath("inv:Clave", namespaces=namespaces)[0].text
+    fechaEmision = factura.xpath("inv:FechaEmision", namespaces=namespaces)[0].text
+    emisor = factura.xpath("inv:Emisor", namespaces=namespaces)[0]
+    receptor_xpath = factura.xpath("inv:Receptor", namespaces=namespaces)
+    receptor = receptor_xpath and receptor_xpath[0]
 
     comprobante = {}
-    comprobante['clave'] = Clave.text
-    comprobante["fecha"] = FechaEmision.text
+    comprobante['clave'] = clave
+    comprobante["fecha"] = fechaEmision
     comprobante['emisor'] = {}
-    comprobante['emisor']['tipoIdentificacion'] = Emisor.find('Identificacion').find('Tipo').text
-    comprobante['emisor']['numeroIdentificacion'] = Emisor.find('Identificacion').find('Numero').text
-    if Receptor is not None and Receptor.find('Identificacion') is not None:
+    comprobante['emisor']['tipoIdentificacion'] = emisor.xpath("inv:Identificacion/inv:Tipo", namespaces=namespaces)[0].text
+    comprobante['emisor']['numeroIdentificacion'] = emisor.xpath("inv:Identificacion/inv:Numero", namespaces=namespaces)[0].text
+    if receptor and inv.partner_id.identification_id.code != '05':
         comprobante['receptor'] = {}
-        comprobante['receptor']['tipoIdentificacion'] = Receptor.find('Identificacion').find('Tipo').text
-        comprobante['receptor']['numeroIdentificacion'] = Receptor.find('Identificacion').find('Numero').text
+        comprobante['receptor']['tipoIdentificacion'] = receptor.xpath("inv:Identificacion/inv:Tipo", namespaces=namespaces)[0].text
+        comprobante['receptor']['numeroIdentificacion'] = receptor.xpath("inv:Identificacion/inv:Numero", namespaces=namespaces)[0].text
 
-    comprobante['comprobanteXml'] = base64.b64encode(xml).decode('utf-8')
+    comprobante['comprobanteXml'] = xml
 
     headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer {}'.format(token)}
 
@@ -330,11 +400,194 @@ def send_file(inv, token, date, xml, env):
 
     except requests.exceptions.RequestException as e:
         _logger.info('Exception %s' % e)
-        raise Exception(e)
+        return {'status': 400, 'text': 'Excepción de envio XML'}
+        #raise Exception(e)
 
-    return {'resp': {'Status': response.status_code, 'text': response.text}}
+    if not (200 <= response.status_code <= 299):
+        error_cause = response.headers.get('X-Error-Cause', response.text)
+        _logger.error('MAB - ERROR SEND MESSAGE - RESPONSE:%s' % error_cause)
+        return {'status': response.status_code, 'text': error_cause}
+    else:
+        return {'status': response.status_code, 'text': response.text}
+
+def send_message(inv, date_cr, token,  env):
+
+    if env == 'api-stag':
+        url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/'
+    elif env == 'api-prod':
+        url = 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/'
+    else:
+        _logger.error('MAB - Ambiente no definido')
+        return
+
+    comprobante = {}
+    comprobante['clave'] = inv.number_electronic
+    comprobante['consecutivoReceptor'] = inv.consecutive_number_receiver
+    comprobante["fecha"] = date_cr
+    vat = re.sub('[^0-9]', '', inv.partner_id.vat)
+    comprobante['emisor'] = {}
+    comprobante['emisor']['tipoIdentificacion'] = inv.partner_id.identification_id.code
+    comprobante['emisor']['numeroIdentificacion'] = vat
+    comprobante['receptor'] = {}
+    comprobante['receptor']['tipoIdentificacion'] = inv.company_id.identification_id.code
+    comprobante['receptor']['numeroIdentificacion'] = inv.company_id.vat
+
+    comprobante['comprobanteXml'] = inv.xml_comprobante
+    _logger.info('MAB - Comprobante : %s' % comprobante)
+    headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer {}'.format(token)}
+    _logger.info('MAB - URL : %s' % url)
+    _logger.info('MAB - Headers : %s' % headers)
+
+    try:
+        response = requests.post(url, data=json.dumps(comprobante), headers=headers)
+
+    except requests.exceptions.RequestException as e:
+        _logger.info('Exception %s' % e)
+        return {'status': 400, 'text': u'Excepción de envio XML'}
+        #raise Exception(e)
+
+    if not (200 <= response.status_code <= 299):
+        _logger.error('MAB - ERROR SEND MESSAGE - RESPONSE:%s' % response.headers.get('X-Error-Cause','Unknown'))
+        return {'status': response.status_code, 'text': response.headers.get('X-Error-Cause','Unknown')}
+    else:
+        return {'status': response.status_code, 'text': response.text}
+
+def consulta_clave(clave, token, env):
+
+    if env == 'api-stag':
+        url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/' + clave
+    elif env == 'api-prod':
+        url = 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/' + clave
+    else:
+        _logger.error('MAB - Ambiente no definido')
+        return
+
+    headers = {'Authorization': 'Bearer {}'.format(token),
+               'Cache-Control': 'no-cache',
+               'Content-Type': 'application/x-www-form-urlencoded',
+               'Postman-Token': 'bf8dc171-5bb7-fa54-7416-56c5cda9bf5c'
+    }
+
+    _logger.error('MAB - consulta_clave - url: %s' % url)
+
+    try:
+        response = requests.get(url, headers=headers)
+    except requests.exceptions.RequestException as e:
+        _logger.error('Exception %s' % e)
+        return {'status': -1, 'text': 'Excepcion %s' % e}
+
+    if 200 <= response.status_code <= 299:
+        respuesta_xml = response.json().get('respuesta-xml')
+        ind_estado = response.json().get('ind-estado')
+
+        if ind_estado in ( 'rechazado', 'error'):
+            xml_decoded = base64.b64decode(respuesta_xml)
+            try:
+                respuesta = etree.fromstring(xml_decoded)
+            except Exception, e:
+                _logger.info('MAB - This XML file is not XML-compliant.  Exception %s' % e)
+                return {'status': 400, 'text': 'Excepción de conversión de XML'}
+
+            namespaces = respuesta.nsmap
+            resp_xmlns = namespaces.pop(None)
+            namespaces['resp'] = resp_xmlns
+
+            resp_xml_xpath = respuesta.xpath("resp:DetalleMensaje", namespaces=namespaces)
+            if resp_xml_xpath:
+                texto_respuesta = resp_xml_xpath[0].text
+                if texto_respuesta.find(u'La firma del comprobante electrónico no es válida') != -1:
+                    response_json = {
+                        'status': 200,
+                        'ind-estado': 'firma_invalida',
+                        'respuesta-xml': respuesta_xml
+                    }
+                else:
+                    response_json = {
+                        'status': 200,
+                        'ind-estado': ind_estado,
+                        'respuesta-xml': respuesta_xml
+                    }
+        else:
+            response_json = {
+                'status': 200,
+                'ind-estado': ind_estado,
+                'respuesta-xml': respuesta_xml
+            }
+    elif response.status_code == 400:
+        response_json = {'status': 400, 'ind-estado': 'no_encontrado'}
+    elif 400 <= response.status_code <= 499:
+        response_json = {'status': 400, 'ind-estado': 'error'}
+    else:
+        _logger.error('MAB - consulta_clave failed.  error: %s', response.status_code)
+        response_json = {'status': response.status_code, 'text': 'token_hacienda failed: %s' % response.reason}
+    return response_json
+
+"""
+def consulta_lista(clave, token, env):
+
+import json
+import requests
+import re
+import random
+import logging
+from odoo.exceptions import UserError
+
+import base64
+from lxml import etree
+import datetime
+import time
+import pytz
+
+#envi = 'api-prod'
+#url = 'https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token'
+envi = 'api-stag'
+url = 'https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token'
+
+cia = env['res.company'].browse(1)
 
 
+data = {
+    'client_id': envi,
+    'client_secret': '',
+    'grant_type': 'password',
+    'username': cia.frm_ws_identificador,
+    'password': cia.frm_ws_password}
+response = requests.post(url, data=data)
+
+if 200 <= response.status_code <= 299:
+    token = response.json().get('access_token')
+else:
+    print 'error token'
+    print response.reason
+    
+
+if envi == 'api-stag':
+    url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/comprobantes/?offset=1&limit=50'
+    url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/comprobantes/?offset=1&limit=50&emisor=0200' + cia.vat
+    url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/comprobantes/50613111800310103790200100001010000000009139220851'
+    url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/50626121800010835040800100001010000001020191916747-00100001050000000005'
+elif envi == 'api-prod':
+    url = 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/comprobantes/?offset=1&limit=50'
+    url = 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/50609101800310127328900100001010000000714101000714-00100001050000000004'
+    url = 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/50609101800310127328900100001010000000714101000714'
+
+headers = {'Authorization': 'Bearer {}'.format(token),
+}
+
+#           'Cache-Control': 'no-cache',
+#           'Content-Type': 'application/x-www-form-urlencoded',
+#           'Postman-Token': 'bf8dc171-5bb7-fa54-7416-56c5cda9bf5c'
+
+response = requests.get(url, headers=headers)
+if 200 <= response.status_code <= 299:
+    response_json = response.json()
+else:
+    print 'error obteniendo lista comprobantes'
+    print response.reason
+    
+"""
+
+"""
 def consulta_documentos(self, inv, env, token_m_h, url, date_cr, xml_firmado):
     payload = {}
     headers = {}
@@ -424,43 +677,4 @@ def consulta_documentos(self, inv, env, token_m_h, url, date_cr, xml_firmado):
 
                 # limpia el template de los attachments
                 email_template.attachment_ids = [(5)]
-
-
-def consulta_clave(clave, token, env):
-
-    if env == 'api-stag':
-        url = 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/' + clave
-    elif env == 'api-prod':
-        url = 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/' + clave
-    else:
-        _logger.error('MAB - Ambiente no definido')
-        return
-
-    headers = {'Authorization': 'Bearer {}'.format(token),
-               'Cache-Control': 'no-cache',
-               'Content-Type': 'application/x-www-form-urlencoded',
-               'Postman-Token': 'bf8dc171-5bb7-fa54-7416-56c5cda9bf5c'
-    }
-
-    _logger.error('MAB - consulta_clave - url: %s' % url)
-
-    try:
-        #response = requests.request("GET", url, headers=headers)
-        response = requests.get(url, headers=headers)
-        ############################
-    except requests.exceptions.RequestException as e:
-        _logger.error('Exception %s' % e)
-        return {'status': -1, 'text': 'Excepcion %s' % e}
-
-    if 200 <= response.status_code <= 299:
-        response_json = {
-            'status': 200,
-            'ind-estado': response.json().get('ind-estado'),
-            'respuesta-xml': response.json().get('respuesta-xml')
-        }
-    elif 400 <= response.status_code <= 499:
-        response_json = {'status': 400, 'ind-estado': 'error'}
-    else:
-        _logger.error('MAB - consulta_clave failed.  error: %s', response.status_code)
-        response_json = {'status': response.status_code, 'text': 'token_hacienda failed: %s' % response.reason}
-    return response_json
+"""

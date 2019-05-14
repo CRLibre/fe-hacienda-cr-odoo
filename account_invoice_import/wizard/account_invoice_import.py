@@ -994,7 +994,7 @@ class AccountInvoiceImport(models.TransientModel):
                     'invoice_import_email of the companies of this DB was '
                     'not found as destination of this email (to: %s, cc: %s). '
                     'Ignoring this email.',
-                    msg_dict['email_to'], msg_dict['cc'])
+                    msg_dict.get('email_to'), msg_dict.get('cc'))
                 return
         else:  # mono-company setup
             company_id = all_companies[0]['id']
