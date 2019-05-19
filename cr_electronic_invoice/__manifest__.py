@@ -20,7 +20,8 @@
              'data/reference_document_data.xml',
              'data/sale_conditions_data.xml',
              'data/mail_template_data.xml',
-             'data/aut.ex.csv',
+             'data/aut_ex_data.xml',
+             'data/account_tax_data.xml'
              'views/uom_views.xml',
              'views/account_invoice_views.xml',
              'views/account_journal_views.xml',
