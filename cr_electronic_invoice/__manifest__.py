@@ -2,7 +2,7 @@
 
 {
     'name': 'Facturación electrónica Costa Rica',
-	'version': '0.2',
+	'version': '11.0.2.0.0',
 	'author': 'CRLibre.org',
 	'license': 'AGPL-3',
 	'website': 'https://crlibre.org/',
