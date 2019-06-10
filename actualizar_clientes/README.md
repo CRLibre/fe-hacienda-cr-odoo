@@ -10,4 +10,4 @@ Instalar el modulo actualizar_clientes de forma Habitual.
 <br>
 configuracion
 <br>
- En el formulario de la compañia en la pestaña Nombre Clientes agregar la URL y Token del API de FSS Solutions o Bien los datos de su API en su servidor.
+ En el formulario de la compañia en la pestaña Nombre Clientes agregar la URL y Token del API de FSS Solutions Puede solicitar la prueba del mismo en fss-cr.com o Bien los datos de su API en su servidor descargando el codigo fuente en https://github.com/fss-solutions/Api_Cedulas .
