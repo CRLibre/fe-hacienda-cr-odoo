@@ -1,7 +1,6 @@
-odoo_12
+Este proyecto está inactivo. 
 
-Debe hacer clone del branch con la versión de Odoo que desea utilizar.
-<br>
-11.0 para Odoo 11
-<br>
-10.0 para Odoo 10
+La nueva versión se encuentra en:
+
+https://github.com/odoocr/l10n_cr
+
